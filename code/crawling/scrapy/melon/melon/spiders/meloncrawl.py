@@ -16,17 +16,9 @@ class MeloncrawlSpider(scrapy.Spider):
 
         # 최종 df 읽어오기
         gaon_df = pd.read_csv('./new_gaon_data.csv', index_col=0)
-        gaon_df = gaon_df.loc[gaon_df['year']==2023]
-
-        # # 이 파일 안에서 노래제목에서 괄호 삭제 전처리 하는 코드
-        # new_music_list = []
-        # for i in range(len(gaon_df)):
-        #     music = gaon_df['music'].iloc[i]
-        #     if music.find('(') != -1:
-        #         music = re.sub(' \([^)]*\)', '', music) #정규표현식으로 괄호 안의 내용 모두 삭제
-        #     new_music_list.append(music)
-        # gaon_df['music'] = new_music_list
-
+        gaon_df = gaon_df.loc[gaon_df['year']==2016]
+        # gaon_df = gaon_df[:int(len(gaon_df)/2)]
+        gaon_df = gaon_df[2650:]
         music_list = gaon_df['music'].unique().tolist()
         
         yield scrapy.Request(url = self.base_url,
@@ -47,27 +39,23 @@ class MeloncrawlSpider(scrapy.Spider):
                 p = re.compile('\(([^)]+)')
                 singer_bracket = p.findall(singer)[0]
                 singer = re.sub(' \([^)]*\)','', singer) #정규표현식으로 괄호 안의 내용 모두 삭제
-            # 괄호 없는 경우는 singer_bracket 변수에 값 없음
+            # 괄호 없는 경우는 변수에 가수 이름 그대로 저장
             else:
-                singer_bracket = ''
+                singer_bracket = singer
 
             # 가수 이름의 공백을 '+'로 바꿔줌
             singer = singer.replace(' ', '+')
 
+            music = music.replace(' ', '+')
+
             # 오류 방지를 위해 가수 3명이상 같이 부른 노래면 맨 앞 사람만으로 검색하기
             singer_list = singer.split('+')
-
-            # 음악 이름에 있는 ( 없애주기
-            if music.find(')') != -1:
-                music = music.replace(')','')
-
-            music = music.replace(' ', '+')
 
             # music_parse 함수로 보내기
             yield scrapy.Request(url = self.base_url,
                                 callback = self.music_parse, 
                                 meta={'singer_list':singer_list,'singer_bracket':singer_bracket, 
-                                      'music':music})
+                                'music':music})
         
 
     def music_parse(self,response):
@@ -76,6 +64,7 @@ class MeloncrawlSpider(scrapy.Spider):
         singer_list = response.meta['singer_list']
         singer_bracket = response.meta['singer_bracket']
         music = response.meta['music']
+
         id_url = 'search/total/index.htm?q='
 
         # singer을 바꿔서 검색
@@ -114,10 +103,14 @@ class MeloncrawlSpider(scrapy.Spider):
                         yield scrapy.Request(url = self.base_url + f'song/detail.htm?songId={music_id}',
                                     callback = self.movie_parse, 
                                     meta={'singer_list':singer_list, 'music':music, 
-                                        'music_like':music_like, 'singer_bracket':singer_bracket,
+                                        'music_like':music_like,
                                         'release_date':release_date, 'category':category})
                         break
-         
+                        # # item저장함수로 메타에 담아서 하나 보내기
+                        # yield scrapy.Request(url = self.base_url,
+                        #             callback = self.parse, 
+                        #             meta={'singer_list':singer_list, 'music':music, 'music_like':music_like,
+                        #                 'release_date':release_date, 'category':category})
                                 
                     except:
                         print(f'가수리스트에서 다른 가수로 검색 시도, 가수리스트:{singer_list}')
@@ -126,41 +119,38 @@ class MeloncrawlSpider(scrapy.Spider):
 
             # 가수 이름으로 검색해서 없으면 가수이름 괄호 안의 이름으로 검색
             except:
-                # 괄호 없으면 pass
-                if singer_bracket == '':
-                    pass
-                else:
-                    URL = self.base_url + id_url + singer_bracket + '+' + music
+                URL = self.base_url + id_url + singer_bracket + '+' + music
 
-                    header = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.75 Safari/537.36"}
-                    response = requests.get(URL,headers=header)
-                    soup = BeautifulSoup(response.text, 'html.parser')
+                header = {"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.75 Safari/537.36"}
+                response = requests.get(URL,headers=header)
+                soup = BeautifulSoup(response.text, 'html.parser')
 
-                    links = soup.select_one('#frm_songList > div > table > tbody > tr:nth-child(1) > td:nth-child(1) > div > input')
-                    music_id = links.attrs['value']
+                links = soup.select_one('#frm_songList > div > table > tbody > tr:nth-child(1) > td:nth-child(1) > div > input')
+                music_id = links.attrs['value']
 
-                    time.sleep(1)
-                    URL_1 = self.base_url + f'song/detail.htm?songId={music_id}'
-                    response_1 = requests.get(URL_1,headers=header)
-                    soup = BeautifulSoup(response_1.text, 'html.parser')
+                time.sleep(1)
+                URL_1 = self.base_url + f'song/detail.htm?songId={music_id}'
+                response_1 = requests.get(URL_1,headers=header)
+                soup = BeautifulSoup(response_1.text, 'html.parser')
 
-                    # 발매일, 장르
-                    release_date = soup.select_one('#downloadfrm > div > div > div.entry > div.meta > dl > dd:nth-child(4)').text
-                    category = soup.select_one('#downloadfrm > div > div > div.entry > div.meta > dl > dd:nth-child(6)').text
-                    
-                    # 좋아요 가져오기위해 json으로 접근
-                    URL_2 = f'https://www.melon.com/commonlike/getSongLike.json?contsIds={music_id}'
-                    response_2 = requests.get(URL_2,headers=header).text
+                # 발매일, 장르
+                release_date = soup.select_one('#downloadfrm > div > div > div.entry > div.meta > dl > dd:nth-child(4)').text
+                category = soup.select_one('#downloadfrm > div > div > div.entry > div.meta > dl > dd:nth-child(6)').text
+                
+                time.sleep(1)
+                # 좋아요 가져오기위해 json으로 접근
+                URL_2 = f'https://www.melon.com/commonlike/getSongLike.json?contsIds={music_id}'
+                response_2 = requests.get(URL_2,headers=header).text
 
-                    like_json = json.loads(response_2)
-                    music_like = like_json['contsLike'][0]['SUMMCNT']
+                like_json = json.loads(response_2)
+                music_like = like_json['contsLike'][0]['SUMMCNT']
 
-                    # 뮤비 데이터 추출 함수 보내기
-                    yield scrapy.Request(url = self.base_url + f'song/detail.htm?songId={music_id}',
-                                callback = self.movie_parse, 
-                                meta={'singer_list':singer_list, 'music':music, 
-                                    'music_like':music_like, 'singer_bracket':singer_bracket,
-                                    'release_date':release_date, 'category':category})
+                # 뮤비 데이터 추출 함수 보내기
+                yield scrapy.Request(url = self.base_url + f'song/detail.htm?songId={music_id}',
+                            callback = self.movie_parse, 
+                            meta={'singer_list':singer_list, 'music':music, 
+                                  'music_like':music_like,
+                                  'release_date':release_date, 'category':category})
                 
 
             
@@ -174,7 +164,6 @@ class MeloncrawlSpider(scrapy.Spider):
         '''노래 id로 상세페이지에 접근하여 data 추출하는 함수입니다'''
 
         singer_list = response.meta['singer_list']
-        singer_bracket = response.meta['singer_bracket']
         music = response.meta['music']
         music_like = response.meta['music_like']
         release_date = response.meta['release_date']
@@ -193,7 +182,7 @@ class MeloncrawlSpider(scrapy.Spider):
             movie = re.sub('[a-zA-z:.(\')]', '', movie)
             movie_id = movie.split(', ')[1]
 
-
+            time.sleep(1)
             # 뮤비 고유 코드 이용해서 json 접근해서 뮤비 뷰수와 좋아요 가져오기
             URL_4 = f'https://www.melon.com/commonlike/getMvLikeWithReadCnt.json?contsIds={movie_id}'
             response_3 = requests.get(URL_4, headers=header).text
@@ -204,9 +193,9 @@ class MeloncrawlSpider(scrapy.Spider):
             # item저장함수로 메타에 담아서 하나 보내기
             yield scrapy.Request(url = self.base_url,
                         callback = self.parse, 
-                        meta={'singer_list':singer_list, 'music':music,
+                        meta={'singer_list':singer_list, 'music':music, 
                             'movie_like':movie_like, 'movie_views':movie_views,
-                            'music_like':music_like, 'singer_bracket':singer_bracket,
+                            'music_like':music_like,
                             'release_date':release_date, 'category':category})
 
         except:
@@ -214,9 +203,9 @@ class MeloncrawlSpider(scrapy.Spider):
             # item저장함수로 메타에 담아서 하나 보내기
             yield scrapy.Request(url = self.base_url,
                         callback = self.parse, 
-                        meta={'singer_list':singer_list, 'music':music,
-                              'music_like':music_like, 'singer_bracket':singer_bracket,
-                              'release_date':release_date, 'category':category})
+                        meta={'singer_list':singer_list, 'music':music, 
+                              'music_like':music_like,
+                            'release_date':release_date, 'category':category})
 
 
     # data 저장
@@ -226,13 +215,7 @@ class MeloncrawlSpider(scrapy.Spider):
         music = response.meta['music']
         music = music.replace('+', ' ')
         singer_list = response.meta['singer_list']
-        singer_bracket = response.meta['singer_bracket']
-        
-        if singer_bracket == '':
-            singer = ' '.join([s for s in singer_list])
-        else:
-            singer = ' '.join([s for s in singer_list])
-            singer = singer + ' (' + singer_bracket + ')'
+        singer = ' '.join([s for s in singer_list])
 
         item['music'] = music
         item['singer'] = singer
