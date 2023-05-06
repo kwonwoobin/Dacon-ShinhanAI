@@ -16,9 +16,7 @@ class MeloncrawlSpider(scrapy.Spider):
 
         # 최종 df 읽어오기
         gaon_df = pd.read_csv('./new_gaon_data.csv', index_col=0)
-        gaon_df = gaon_df.loc[gaon_df['year']==2016]
-        # gaon_df = gaon_df[:int(len(gaon_df)/2)]
-        gaon_df = gaon_df[2650:]
+        gaon_df = gaon_df.loc[gaon_df['year']==2014]
         music_list = gaon_df['music'].unique().tolist()
         
         yield scrapy.Request(url = self.base_url,
